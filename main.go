@@ -260,7 +260,10 @@ func updateAddonStartup(profileFolder string) error {
 		return errors.Wrap(err, "Cannot consume addonStartup")
 	}
 
-	addonStartupArray := addonStartup.Path("locations.app-profile.addons").Children()
+	addonStartupArray, err := addonStartup.Path("locations.app-profile.addons").Children()
+	if err != nil {
+		return errors.Wrap(err, "Cannot read addonStartup addons")
+	}
 	for _, v := range addonStartupArray {
 		if v.Path("path").Data() == nil {
 			continue
@@ -280,5 +283,13 @@ func updateAddonStartup(profileFolder string) error {
 		}
 	}
 
-	return mozLz4Compress(lz4File, []byte(addonStartup.String()))
+	compressed, err := mozLz4Compress([]byte(addonStartup.String()))
+	if err != nil {
+		return errors.Wrap(err, "Cannot compress addonStartup")
+	}
+	if err := os.WriteFile(lz4File, compressed, 0644); err != nil {
+		return errors.Wrap(err, "Cannot write addonStartup")
+	}
+
+	return nil
 }
