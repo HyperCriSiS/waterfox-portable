@@ -5,7 +5,7 @@
   <a href="https://portapps.io/app/waterfox-portable/#download"><img src="https://img.shields.io/github/downloads/portapps/waterfox-portable/total.svg?style=flat-square" alt="Total downloads"></a>
   <a href="https://github.com/portapps/waterfox-portable/actions?workflow=build"><img src="https://img.shields.io/github/actions/workflow/status/portapps/waterfox-portable/build.yml?label=build&logo=github&style=flat-square" alt="Build Status"></a>
   <br /><a href="https://github.com/sponsors/crazy-max"><img src="https://img.shields.io/badge/sponsor-crazy--max-181717.svg?logo=github&style=flat-square" alt="Become a sponsor"></a>
-  <a href="https://www.paypal.me/crazyws"><img src="https://img.shields.io/badge/donate-paypal-00457c.svg?style=flat-square" alt="Donate Paypal"></a>
+  <a href="https://www.paypal.me/crazyws"><img src="https://img.shields.io/badge/donate-paypal-00457c.svg?logo=paypal&style=flat-square" alt="Donate Paypal"></a>
 </p>
 
 ## Notice of Non-Affiliation and Disclaimer
