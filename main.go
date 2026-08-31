@@ -1,59 +1,59 @@
-//go:generate go install -v github.com/kevinburke/go-bindata/v4/go-bindata
-//go:generate go-bindata -prefix res/ -pkg assets -o assets/assets.go res/Waterfox.lnk
 //go:generate go install -v github.com/josephspurrier/goversioninfo/cmd/goversioninfo
+//go:generate goversioninfo -icon=res/papp.ico -manifest=res/papp.manifest
+
 package main
 
 import (
+	"encoding/json"
 	"fmt"
-	"html/template"
 	"os"
 	"path/filepath"
 	"strings"
+	"text/template"
 
-	"github.com/Jeffail/gabs"
+	"github.com/Jeffail/gabs/v2"
 	"github.com/pkg/errors"
-	"github.com/portapps/portapps/v3"
-	"github.com/portapps/portapps/v3/pkg/files"
-	"github.com/portapps/portapps/v3/pkg/log"
-	"github.com/portapps/portapps/v3/pkg/mutex"
-	"github.com/portapps/portapps/v3/pkg/registry"
-	"github.com/portapps/portapps/v3/pkg/shortcut"
-	"github.com/portapps/portapps/v3/pkg/win"
-	"github.com/portapps/waterfox-portable/assets"
+	"github.com/portapps/portapps"
+	"github.com/portapps/portapps/pkg/files"
+	"github.com/portapps/portapps/pkg/mutex"
+	"github.com/portapps/portapps/pkg/registry"
+	"github.com/portapps/portapps/pkg/shortcut"
+	"github.com/portapps/portapps/pkg/win"
+	"github.com/rs/zerolog/log"
 )
 
-type config struct {
-	Profile           string `yaml:"profile" mapstructure:"profile"`
-	MultipleInstances bool   `yaml:"multiple_instances" mapstructure:"multiple_instances"`
-	Cleanup           bool   `yaml:"cleanup" mapstructure:"cleanup"`
-}
-
 var (
+	// App
 	app *portapps.App
+	// Config
 	cfg *config
 )
 
+type config struct {
+	Cleanup           bool `yaml:"cleanup"`
+	MultipleInstances bool `yaml:"multiple_instances"`
+}
+
 func init() {
 	var err error
-
-	// Default config
-	cfg = &config{
-		Profile:           "default",
-		MultipleInstances: false,
-		Cleanup:           false,
+	app, err = portapps.New("waterfox-portable", "Waterfox")
+	if err != nil {
+		log.Fatal().Err(err).Msg("Cannot initialize application")
 	}
 
-	// Init app
-	if app, err = portapps.NewWithCfg("waterfox-portable", "Waterfox", cfg); err != nil {
-		log.Fatal().Err(err).Msg("Cannot initialize application. See log file for more info.")
+	cfg = &config{
+		Cleanup:           true,
+		MultipleInstances: false,
+	}
+	if err := app.ParseConfig(cfg); err != nil {
+		log.Fatal().Err(err).Msg("Cannot load configuration")
 	}
 }
 
 func main() {
-	if err := os.MkdirAll(app.DataPath, os.ModePerm); err != nil {
-		log.Fatal().Err(err).Msg("Cannot create data directory.")
-	}
-	profileFolder := filepath.Join(app.DataPath, "profile", cfg.Profile)
+	defer app.Close()
+
+	profileFolder := filepath.Join(app.DataPath, "profile", "default")
 	if err := os.MkdirAll(profileFolder, os.ModePerm); err != nil {
 		log.Fatal().Err(err).Msg("Cannot create profile directory.")
 	}
@@ -80,7 +80,6 @@ func main() {
 	os.Setenv("MOZ_DATA_REPORTING", "0")
 	os.Setenv("MOZ_MAINTENANCE_SERVICE", "0")
 	os.Setenv("MOZ_PLUGIN_PATH", pluginsFolder)
-	os.Setenv("MOZ_UPDATER", "0")
 
 	// Create and check mutex
 	mu, err := mutex.Create(app.ID)
@@ -211,7 +210,6 @@ func createPolicies() error {
 		Policies map[string]interface{} `json:"policies"`
 	}{
 		Policies: map[string]interface{}{
-			"DisableAppUpdate":        true,
 			"DontCheckDefaultBrowser": true,
 		},
 	}
@@ -234,7 +232,6 @@ func createPolicies() error {
 		}
 		log.Debug().Msgf("Custom policies: %s", jsonPolicies.String())
 
-		jsonPolicies.Set(true, "policies", "DisableAppUpdate")
 		jsonPolicies.Set(true, "policies", "DontCheckDefaultBrowser")
 	}
 
@@ -258,26 +255,47 @@ func updateAddonStartup(profileFolder string) error {
 		return err
 	}
 
-	prevPathLin := escapedUnixPath(app.Prev.RootPath)
-	currPathLin := escapedUnixPath(app.RootPath)
-	lz4Str := strings.Replace(string(lz4Raw), prevPathLin, currPathLin, -1)
-
-	prevPathWin := escapedWindowsPath(app.Prev.RootPath)
-	currPathWin := escapedWindowsPath(app.RootPath)
-	lz4Str = strings.Replace(lz4Str, prevPathWin, currPathWin, -1)
-
-	lz4Enc, err := mozLz4Compress([]byte(lz4Str))
-	if err != nil {
-		return err
+	var addonStartup map[string]interface{}
+	if err := json.Unmarshal(lz4Raw, &addonStartup); err != nil {
+		return errors.Wrap(err, "Cannot unmarshal addonStartup")
 	}
 
-	return os.WriteFile(lz4File, lz4Enc, 0644)
-}
+	locations, ok := addonStartup["locations"].(map[string]interface{})
+	if !ok {
+		return nil
+	}
 
-func escapedUnixPath(path string) string {
-	return strings.ReplaceAll(filepath.ToSlash(path), ` `, `%20`)
-}
+	for _, locationRaw := range locations {
+		location, ok := locationRaw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		addons, ok := location["addons"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		for _, addonRaw := range addons {
+			addon, ok := addonRaw.(map[string]interface{})
+			if !ok {
+				continue
+			}
+		path, ok := addon["path"].(string)
+			if !ok {
+				continue
+			}
+		if strings.Contains(path, app.Prev.RootPath) {
+				addon["path"] = strings.Replace(path, app.Prev.RootPath, app.RootPath, 1)
+			}
+		}
+	}
 
-func escapedWindowsPath(path string) string {
-	return strings.ReplaceAll(strings.ReplaceAll(filepath.FromSlash(path), `\`, `\\`), ` `, `%20`)
+	updatedRaw, err := json.Marshal(addonStartup)
+	if err != nil {
+		return errors.Wrap(err, "Cannot marshal addonStartup")
+	}
+
+	if err := mozLz4Compress(lz4File, updatedRaw); err != nil {
+		return err
+	}
+	return nil
 }

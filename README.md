@@ -5,7 +5,7 @@
   <a href="https://portapps.io/app/waterfox-portable/#download"><img src="https://img.shields.io/github/downloads/portapps/waterfox-portable/total.svg?style=flat-square" alt="Total downloads"></a>
   <a href="https://github.com/portapps/waterfox-portable/actions?workflow=build"><img src="https://img.shields.io/github/actions/workflow/status/portapps/waterfox-portable/build.yml?label=build&logo=github&style=flat-square" alt="Build Status"></a>
   <br /><a href="https://github.com/sponsors/crazy-max"><img src="https://img.shields.io/badge/sponsor-crazy--max-181717.svg?logo=github&style=flat-square" alt="Become a sponsor"></a>
-  <a href="https://www.paypal.me/crazyws"><img src="https://img.shields.io/badge/donate-paypal-00457c.svg?logo=paypal&style=flat-square" alt="Donate Paypal"></a>
+  <a href="https://www.paypal.me/crazyws"><img src="https://img.shields.io/badge/donate-paypal-00457c.svg?style=flat-square" alt="Donate Paypal"></a>
 </p>
 
 ## Notice of Non-Affiliation and Disclaimer
@@ -20,6 +20,14 @@ The name Waterfox™ as well as related names, marks, emblems and images are reg
 
 Waterfox™ portable app made with 🚀 [Portapps](https://portapps.io).<br />
 Documentation and downloads can be found on https://portapps.io/app/waterfox-portable/
+
+## Self-updating portable build
+
+This fork keeps the portable profile/data layout while allowing Waterfox to use its built-in updater. Waterfox updates the files inside the portable `app` directory; the portable profile remains under `data`.
+
+The Mozilla Maintenance Service remains disabled. No administrator rights are required as long as the portable directory is writable by the current user. Avoid placing the portable installation in a protected directory such as `C:\Program Files`.
+
+The portable launcher has its own version (`app.version`), independent of the bundled bootstrap Waterfox version (`waterfox.version`). After the initial package is installed, Waterfox can update itself without requiring a new portable package release for every Waterfox release.
 
 ## Contributing
 
