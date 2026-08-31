@@ -1,59 +1,59 @@
+//go:generate go install -v github.com/kevinburke/go-bindata/v4/go-bindata
+//go:generate go-bindata -prefix res/ -pkg assets -o assets/assets.go res/Waterfox.lnk
 //go:generate go install -v github.com/josephspurrier/goversioninfo/cmd/goversioninfo
-//go:generate goversioninfo -icon=res/papp.ico -manifest=res/papp.manifest
-
 package main
 
 import (
-	"encoding/json"
 	"fmt"
+	"html/template"
 	"os"
 	"path/filepath"
 	"strings"
-	"text/template"
 
-	"github.com/Jeffail/gabs/v2"
+	"github.com/Jeffail/gabs"
 	"github.com/pkg/errors"
-	"github.com/portapps/portapps"
-	"github.com/portapps/portapps/pkg/files"
-	"github.com/portapps/portapps/pkg/mutex"
-	"github.com/portapps/portapps/pkg/registry"
-	"github.com/portapps/portapps/pkg/shortcut"
-	"github.com/portapps/portapps/pkg/win"
-	"github.com/rs/zerolog/log"
-)
-
-var (
-	// App
-	app *portapps.App
-	// Config
-	cfg *config
+	"github.com/portapps/portapps/v3"
+	"github.com/portapps/portapps/v3/pkg/files"
+	"github.com/portapps/portapps/v3/pkg/log"
+	"github.com/portapps/portapps/v3/pkg/mutex"
+	"github.com/portapps/portapps/v3/pkg/registry"
+	"github.com/portapps/portapps/v3/pkg/shortcut"
+	"github.com/portapps/portapps/v3/pkg/win"
+	"github.com/portapps/waterfox-portable/assets"
 )
 
 type config struct {
-	Cleanup           bool `yaml:"cleanup"`
-	MultipleInstances bool `yaml:"multiple_instances"`
+	Profile           string `yaml:"profile" mapstructure:"profile"`
+	MultipleInstances bool   `yaml:"multiple_instances" mapstructure:"multiple_instances"`
+	Cleanup           bool   `yaml:"cleanup" mapstructure:"cleanup"`
 }
+
+var (
+	app *portapps.App
+	cfg *config
+)
 
 func init() {
 	var err error
-	app, err = portapps.New("waterfox-portable", "Waterfox")
-	if err != nil {
-		log.Fatal().Err(err).Msg("Cannot initialize application")
+
+	// Default config
+	cfg = &config{
+		Profile:           "default",
+		MultipleInstances: false,
+		Cleanup:           false,
 	}
 
-	cfg = &config{
-		Cleanup:           true,
-		MultipleInstances: false,
-	}
-	if err := app.ParseConfig(cfg); err != nil {
-		log.Fatal().Err(err).Msg("Cannot load configuration")
+	// Init app
+	if app, err = portapps.NewWithCfg("waterfox-portable", "Waterfox", cfg); err != nil {
+		log.Fatal().Err(err).Msg("Cannot initialize application. See log file for more info.")
 	}
 }
 
 func main() {
-	defer app.Close()
-
-	profileFolder := filepath.Join(app.DataPath, "profile", "default")
+	if err := os.MkdirAll(app.DataPath, os.ModePerm); err != nil {
+		log.Fatal().Err(err).Msg("Cannot create data directory.")
+	}
+	profileFolder := filepath.Join(app.DataPath, "profile", cfg.Profile)
 	if err := os.MkdirAll(profileFolder, os.ModePerm); err != nil {
 		log.Fatal().Err(err).Msg("Cannot create profile directory.")
 	}
@@ -255,47 +255,30 @@ func updateAddonStartup(profileFolder string) error {
 		return err
 	}
 
-	var addonStartup map[string]interface{}
-	if err := json.Unmarshal(lz4Raw, &addonStartup); err != nil {
-		return errors.Wrap(err, "Cannot unmarshal addonStartup")
-	}
-
-	locations, ok := addonStartup["locations"].(map[string]interface{})
-	if !ok {
-		return nil
-	}
-
-	for _, locationRaw := range locations {
-		location, ok := locationRaw.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		addons, ok := location["addons"].(map[string]interface{})
-		if !ok {
-			continue
-		}
-		for _, addonRaw := range addons {
-			addon, ok := addonRaw.(map[string]interface{})
-			if !ok {
-				continue
-			}
-		path, ok := addon["path"].(string)
-			if !ok {
-				continue
-			}
-		if strings.Contains(path, app.Prev.RootPath) {
-				addon["path"] = strings.Replace(path, app.Prev.RootPath, app.RootPath, 1)
-			}
-		}
-	}
-
-	updatedRaw, err := json.Marshal(addonStartup)
+	addonStartup, err := gabs.ParseJSON(lz4Raw)
 	if err != nil {
-		return errors.Wrap(err, "Cannot marshal addonStartup")
+		return errors.Wrap(err, "Cannot consume addonStartup")
 	}
 
-	if err := mozLz4Compress(lz4File, updatedRaw); err != nil {
-		return err
+	addonStartupArray := addonStartup.Path("locations.app-profile.addons").Children()
+	for _, v := range addonStartupArray {
+		if v.Path("path").Data() == nil {
+			continue
+		}
+		addonPath := v.Path("path").Data().(string)
+		if !filepath.IsAbs(addonPath) {
+			continue
+		}
+		log.Debug().Msgf("Old addon path: %s", addonPath)
+		if !strings.Contains(addonPath, app.Prev.RootPath) {
+			continue
+		}
+		addonPath = strings.Replace(addonPath, app.Prev.RootPath, app.RootPath, 1)
+		log.Debug().Msgf("New addon path: %s", addonPath)
+		if _, err := v.Set(addonPath, "path"); err != nil {
+			return errors.Wrap(err, "Cannot fix addon path")
+		}
 	}
-	return nil
+
+	return mozLz4Compress(lz4File, []byte(addonStartup.String()))
 }
