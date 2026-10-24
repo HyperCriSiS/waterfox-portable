@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.1-2 (2026/10/24)
+
+* Restrict manual release permissions to the release job.
+* Increase Dependabot version update cooldowns to seven days.
+* Restore CI builds by selecting an exact archived Ant version.
+* Point release, download and build badges at this fork.
+* Update launcher and GitHub Actions dependencies.
+* Keep Waterfox self-updates enabled and the portable profile under data.
+* Bundled bootstrap browser remains Waterfox 6.6.7; launcher versioning is independent.
+
 ## 6.6.7-32 (2026/01/05)
 
 * Waterfox 6.6.7
