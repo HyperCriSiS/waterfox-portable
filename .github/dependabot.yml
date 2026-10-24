@@ -5,7 +5,7 @@ updates:
     schedule:
       interval: "daily"
     cooldown:
-      default-days: 2
+      default-days: 7
     labels:
       - ":game_die: dependencies"
       - ":robot: bot"
@@ -14,7 +14,7 @@ updates:
     schedule:
       interval: "daily"
     cooldown:
-      default-days: 2
+      default-days: 7
     labels:
       - ":game_die: dependencies"
       - ":robot: bot"

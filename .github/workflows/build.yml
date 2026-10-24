@@ -19,5 +19,8 @@ on:
 jobs:
   build:
     uses: portapps/.github/.github/workflows/app-build.yml@e5160763f75f635b71a10d8162c004e7f88a1a87 # v1.4.1
+    with:
+      # Exact match uses the archive instead of the action's stale latest release.
+      ant_version: '1.10.16'
     permissions:
       contents: write # required to create a GitHub release on push with a tag
