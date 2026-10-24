@@ -12,13 +12,14 @@ on:
         required: true
         type: string
 
-permissions:
-  actions: read
-  contents: write
+permissions: {}
 
 jobs:
   release:
     runs-on: ubuntu-latest
+    permissions:
+      actions: read # required to download build artifacts
+      contents: write # required to publish the release
     steps:
       - name: Validate release input
         env:
