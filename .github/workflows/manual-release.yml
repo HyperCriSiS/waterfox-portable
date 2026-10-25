@@ -7,7 +7,7 @@ on:
         required: true
         type: string
       run_id:
-        description: Successful daily-waterfox run that created the draft
+        description: Daily run with successful validation stages (recovery after publication failure)
         required: true
         type: string
 permissions: {}
