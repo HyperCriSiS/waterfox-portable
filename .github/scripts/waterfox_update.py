@@ -49,7 +49,8 @@ def api(path, data=None, method=None):
     request = urllib.request.Request('https://api.github.com/' + path,
         data=json.dumps(data).encode() if data is not None else None,
         headers={'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
-                 'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28'},
+                 'Accept': 'application/vnd.github+json', 'Content-Type': 'application/json',
+                 'X-GitHub-Api-Version': '2022-11-28'},
         method=method)
     with urllib.request.urlopen(request, timeout=60) as response:
         body = response.read()
