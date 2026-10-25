@@ -113,6 +113,7 @@ jobs:
       contents: write # required to merge the verified candidate and publish its exact artifacts
       pull-requests: write # required to create and merge this run's candidate PR, never approve reviews
       statuses: write # required to link the candidate commit to the completed validation stages
+      checks: read # required to validate the trusted base's CodeQL and zizmor checks
       actions: read # required to download this run's package and verification proof
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
