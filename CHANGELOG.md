@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+* Automatically create and merge only verified Waterfox update PRs, then publish the exact tested release files; never approve reviews or bypass branch rules.
 * Add daily stable Waterfox checks with signature/provenance verification, fresh/existing profile smoke tests and draft-only release candidates.
 * Require a verified automation run, merged candidate PR and unchanged release assets for manual publication.
 * Update the bundled bootstrap browser to Waterfox 6.7.6 while keeping launcher versioning independent.

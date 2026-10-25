@@ -105,12 +105,15 @@ jobs:
           path: verified/verification.json
           if-no-files-found: error
 
-  draft:
+  release:
     needs: [test, prepare, build, verify]
     if: needs.prepare.outputs.changed == 'true' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     permissions:
-      contents: write # required to create a draft release with the verified artifacts
+      contents: write # required to merge the verified candidate and publish its exact artifacts
+      pull-requests: write # required to create and merge this run's candidate PR, never approve reviews
+      statuses: write # required to link the candidate commit to the completed validation stages
+      checks: read # required to validate the trusted base's CodeQL and zizmor checks
       actions: read # required to download this run's package and verification proof
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -122,11 +125,11 @@ jobs:
         run: |
           gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" --name waterfox-portable --dir release
           gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" --name verified-waterfox --dir verified
-      - name: Create draft and candidate comparison link
+      - name: Merge verified candidate and publish release
         env:
           GH_TOKEN: ${{ github.token }}
           CANDIDATE_SHA: ${{ needs.prepare.outputs.sha }}
           BASE_SHA: ${{ needs.prepare.outputs.base }}
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
           BROWSER_VERSION: ${{ needs.prepare.outputs.browser }}
-        run: python3 .github/scripts/waterfox_update.py draft
+        run: python3 .github/scripts/waterfox_update.py automatic

@@ -49,7 +49,8 @@ def api(path, data=None, method=None):
     request = urllib.request.Request('https://api.github.com/' + path,
         data=json.dumps(data).encode() if data is not None else None,
         headers={'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
-                 'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28'},
+                 'Accept': 'application/vnd.github+json', 'Content-Type': 'application/json',
+                 'X-GitHub-Api-Version': '2022-11-28'},
         method=method)
     with urllib.request.urlopen(request, timeout=60) as response:
         body = response.read()
@@ -112,7 +113,10 @@ def prepare():
         return
     releases = all_releases(repo)
     marker = f'Waterfox bootstrap: {latest}'
-    if any(marker in (release.get('body') or '').splitlines() for release in releases):
+    matching_releases = [release for release in releases if marker in (release.get('body') or '').splitlines()]
+    if any(release.get('draft') for release in matching_releases):
+        raise ValueError('Unpublished candidate exists; inspect the failed release run')
+    if matching_releases:
         output(dict(build='false', changed='false'))
         return
     for release in releases:
@@ -190,8 +194,7 @@ def draft():
              f'Build and verification: https://github.com/{repo}/actions/runs/{os.environ["GITHUB_RUN_ID"]}\n\n'
              'Windows signature, archive integrity, SHA256 hashes, fresh and existing portable profile starts passed. '
              'Browser self-updates and privacy defaults are retained.\n\n'
-             f'Draft only: create and review the candidate PR at https://github.com/{repo}/compare/master...{branch}?expand=1 '
-             'and merge it before publishing.\n')
+             'Automatically merged and published only after all required validation stages pass.\n')
     # gh creates a draft and uploads the exact files verified above. Never clobber assets.
     Path('release-notes.md').write_text(notes, encoding='utf-8')
     import subprocess
@@ -210,23 +213,89 @@ def validate_proof(proof, sha, tag, browser):
         raise ValueError('Invalid verification file manifest')
 
 
-def publish():
-    """Publish only a verified automation draft whose exact candidate PR was merged."""
+def merge_candidate():
+    """Merge only this run's already verified candidate, never approve a review."""
+    repo = os.environ['GITHUB_REPOSITORY']
+    sha, base = os.environ['CANDIDATE_SHA'], os.environ['BASE_SHA']
+    browser = os.environ['BROWSER_VERSION']
+    version(browser)
+    branch = 'automation/waterfox-' + browser
+    if api(f'repos/{repo}/git/ref/heads/master')['object']['sha'] != base:
+        raise ValueError('Master changed before merge')
+    if api(f'repos/{repo}/git/ref/heads/{branch}')['object']['sha'] != sha:
+        raise ValueError('Candidate changed before merge')
+    api(f'repos/{repo}/statuses/{sha}', {'state': 'success', 'context': 'waterfox/verified-update',
+        'description': 'Signed package, profile and safety validation passed',
+        'target_url': f'https://github.com/{repo}/actions/runs/{os.environ["GITHUB_RUN_ID"]}'})
+    pulls = api(f'repos/{repo}/pulls?state=open&base=master&head={repo.split("/")[0]}:{branch}')
+    if not pulls:
+        pulls = [api(f'repos/{repo}/pulls', {'title': f'Update Waterfox bootstrap to {browser}',
+            'head': branch, 'base': 'master',
+            'body': f'Automated version-only update. All package and safety tests passed in https://github.com/{repo}/actions/runs/{os.environ["GITHUB_RUN_ID"]}. No launcher code or workflow changes.'})]
+    if (len(pulls) != 1 or pulls[0]['head']['sha'] != sha or pulls[0]['base']['ref'] != 'master'
+            or pulls[0]['head']['repo']['full_name'].lower() != repo.lower()
+            or pulls[0]['base']['repo']['full_name'].lower() != repo.lower()):
+        raise ValueError('PR does not identify the exact verified candidate')
+    # GitHub computes mergeability asynchronously after PR creation.
+    import time
+    for attempt in range(15):
+        current = api(f'repos/{repo}/pulls/{pulls[0]["number"]}')
+        if current['head']['sha'] != sha:
+            raise ValueError('PR head changed while waiting for mergeability')
+        if current.get('mergeable') is True:
+            break
+        if current.get('mergeable') is False:
+            raise ValueError('Candidate has a merge conflict')
+        time.sleep(2)
+    else:
+        raise ValueError('GitHub did not confirm candidate mergeability in time')
+    if api(f'repos/{repo}/git/ref/heads/master')['object']['sha'] != base:
+        raise ValueError('Master changed while waiting for mergeability')
+    result = api(f'repos/{repo}/pulls/{pulls[0]["number"]}/merge',
+                 {'sha': sha, 'merge_method': 'merge'}, method='PUT')
+    if result.get('merged') is not True:
+        raise ValueError('Candidate PR was not merged')
+    merged = api(f'repos/{repo}/git/commits/{result["sha"]}')
+    candidate = api(f'repos/{repo}/git/commits/{sha}')
+    if merged['tree']['sha'] != candidate['tree']['sha'] or sha not in [parent['sha'] for parent in merged['parents']]:
+        raise ValueError('Merged tree differs from the tested candidate; refuse publication')
+    return result['sha']
+
+
+def automatic():
+    # Draft validation checks the exact allowed diff, base security checks and package proof
+    # before the first PR/merge operation. The draft remains private if a later gate fails.
+    draft()
+    merge_candidate()
+    os.environ['BUILD_RUN_ID'] = os.environ['GITHUB_RUN_ID']
+    publish(current_run=True)
+
+
+def publish(current_run=False):
+    """Publish only verified files whose exact candidate PR was merged."""
     repo, tag = os.environ['GITHUB_REPOSITORY'], os.environ['RELEASE_TAG']
     run_id = os.environ['BUILD_RUN_ID']
     if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+-[0-9]+', tag) or not re.fullmatch(r'[0-9]+', run_id):
         raise ValueError('Invalid release input')
     run = api(f'repos/{repo}/actions/runs/{run_id}')
-    if (run['path'] != '.github/workflows/daily-waterfox.yml' or run['conclusion'] != 'success'
+    if (run['path'] != '.github/workflows/daily-waterfox.yml'
             or run['head_branch'] != 'master' or run['event'] not in ('schedule', 'workflow_dispatch')
             or run['head_repository']['full_name'].lower() != repo.lower()):
         raise ValueError('Not a successful trusted daily update run')
+    if current_run:
+        if run_id != os.environ['GITHUB_RUN_ID'] or run['head_sha'] != os.environ['BASE_SHA']:
+            raise ValueError('Automatic publication must belong to this run and base')
+    elif run['conclusion'] not in ('success', 'failure'):
+        raise ValueError('Originating run must have finished')
     jobs = api(f'repos/{repo}/actions/runs/{run_id}/jobs?per_page=100')['jobs']
-    if not any(job['name'] == 'verify' and job['conclusion'] == 'success' for job in jobs):
-        raise ValueError('Package verification did not succeed')
+    for name in ('test', 'prepare', 'build / build', 'build / release', 'verify'):
+        matching = [job for job in jobs if job['name'] == name]
+        if not matching or any(job['conclusion'] != 'success' for job in matching):
+            raise ValueError(f'Required validation stage did not succeed: {name}')
     import subprocess
-    subprocess.run(['gh', 'run', 'download', run_id, '--repo', repo,
-                    '--name', 'verified-waterfox', '--dir', 'verified'], check=True)
+    if not current_run:
+        subprocess.run(['gh', 'run', 'download', run_id, '--repo', repo,
+                        '--name', 'verified-waterfox', '--dir', 'verified'], check=True)
     proof = json.loads(Path('verified/verification.json').read_text())
     validate_proof(proof, proof['sha'], tag, proof['browser'])
     if not re.fullmatch(r'[a-f0-9]{40}', proof['sha']):
@@ -242,7 +311,7 @@ def publish():
     pulls = api(f'repos/{repo}/commits/{proof["sha"]}/pulls')
     if not any(pr['merged_at'] and pr['head']['sha'] == proof['sha'] and pr['base']['ref'] == 'master'
                and pr['base']['repo']['full_name'].lower() == repo.lower() for pr in pulls):
-        raise ValueError('The exact candidate PR must be reviewed and merged first')
+        raise ValueError('The exact candidate PR must be merged first')
     # Drafts may not have a git tag yet; the published-by-tag endpoint is unsuitable.
     matching = [release for release in all_releases(repo) if release['tag_name'] == tag]
     if len(matching) != 1:
@@ -263,4 +332,4 @@ def publish():
 
 if __name__ == '__main__':
     import sys
-    {'prepare': prepare, 'draft': draft, 'publish': publish}[sys.argv[1]]()
+    {'prepare': prepare, 'automatic': automatic, 'publish': publish}[sys.argv[1]]()
