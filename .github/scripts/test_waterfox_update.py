@@ -166,24 +166,37 @@ class UpdateTests(unittest.TestCase):
         # The current run already has its proof; no second artifact download occurs.
         self.publish_fixture(current=True)
 
-    def merge_fixture(self, stale_base=False, wrong_head=False, refused=False, different_tree=False):
+    def merge_fixture(self, stale_base=False, wrong_head=False, refused=False, different_tree=False, delayed=False, conflict=False, timeout=False):
         sha = 'c' * 40
         pr = dict(number=7, mergeable=True, head={'sha': 'd' * 40 if wrong_head else sha, 'repo': {'full_name': 'owner/repo'}}, base={'ref': 'master', 'repo': {'full_name': 'owner/repo'}})
         responses = [{'object': {'sha': 'b' * 40 if stale_base else 'a' * 40}},
-                     {'object': {'sha': sha}}, {}, [], pr,
-                     pr, {'object': {'sha': 'a' * 40}},
+                     {'object': {'sha': sha}}, {}, [], pr]
+        responses += [dict(pr, mergeable=None)] * (15 if timeout else 1 if delayed else 0)
+        responses += [dict(pr, mergeable=not conflict), {'object': {'sha': 'a' * 40}},
                      {'merged': not refused, 'sha': 'e' * 40},
                      {'tree': {'sha': 'changed' if different_tree else 'tree'}, 'parents': [{'sha': 'a' * 40}, {'sha': sha}]},
                      {'tree': {'sha': 'tree'}}]
-        with patch.dict(os.environ, GITHUB_REPOSITORY='owner/repo', CANDIDATE_SHA=sha, BASE_SHA='a' * 40, BROWSER_VERSION='6.7.7', GITHUB_RUN_ID='123'), patch.object(update, 'api', side_effect=responses) as api:
+        with patch.dict(os.environ, GITHUB_REPOSITORY='owner/repo', CANDIDATE_SHA=sha, BASE_SHA='a' * 40, BROWSER_VERSION='6.7.7', GITHUB_RUN_ID='123'), patch.object(update, 'api', side_effect=responses) as api, patch('time.sleep'):
             self.assertEqual(update.merge_candidate(), 'e' * 40)
-            self.assertEqual(api.call_args_list[7].args[1]['sha'], sha)
-            self.assertEqual(api.call_args_list[7].kwargs['method'], 'PUT')
+            merge_call = api.call_args_list[8 if delayed else 7]
+            self.assertEqual(merge_call.args[1]['sha'], sha)
+            self.assertEqual(merge_call.kwargs['method'], 'PUT')
             self.assertEqual(api.call_args_list[2].args[1]['context'], 'waterfox/verified-update')
             self.assertFalse(any('/reviews' in call.args[0] for call in api.call_args_list))
 
     def test_exact_candidate_is_merged_without_review_approval(self):
         self.merge_fixture()
+
+    def test_pending_mergeability_is_retried(self):
+        self.merge_fixture(delayed=True)
+
+    def test_mergeability_timeout_stops_release(self):
+        with self.assertRaisesRegex(ValueError, 'in time'):
+            self.merge_fixture(timeout=True)
+
+    def test_merge_conflict_stops_release(self):
+        with self.assertRaisesRegex(ValueError, 'merge conflict'):
+            self.merge_fixture(conflict=True)
 
     def test_stale_master_blocks_merge(self):
         with self.assertRaisesRegex(ValueError, 'Master changed'):
