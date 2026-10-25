@@ -64,7 +64,7 @@ jobs:
 
   build:
     needs: [test, prepare]
-    if: always() && needs.test.result == 'success' && (github.event_name == 'pull_request' || needs.prepare.outputs.build == 'true')
+    if: ${{ !cancelled() && needs.test.result == 'success' && (github.event_name == 'pull_request' || needs.prepare.outputs.build == 'true') }}
     permissions:
       contents: read # compilation and packaging never receive repository write access
     uses: portapps/.github/.github/workflows/app-build.yml@e5160763f75f635b71a10d8162c004e7f88a1a87 # v1.4.1
@@ -74,7 +74,7 @@ jobs:
 
   verify:
     needs: [test, prepare, build]
-    if: always() && needs.build.result == 'success'
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
     runs-on: windows-latest
     timeout-minutes: 15
     permissions:
