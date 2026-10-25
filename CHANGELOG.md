@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+* Update the bundled bootstrap browser to Waterfox 6.7.6 while keeping launcher versioning independent.
+* Embed the default shortcut with Go instead of generating it with go-bindata.
+* Use the module-pinned goversioninfo 1.7.0 tool for Windows resources.
+* Release mutex handles only after successful creation, ignore empty cleanup environment paths and check configuration file close errors.
+* Preserve browser self-updates, privacy defaults and the portable profile layout.
+
 ## 1.0.1-2 (2026/10/24)
 
 * Restrict manual release permissions to the release job.

@@ -1,9 +1,7 @@
-//go:generate go install -v github.com/kevinburke/go-bindata/v4/go-bindata
-//go:generate go-bindata -prefix res/ -pkg assets -o assets/assets.go res/Waterfox.lnk
-//go:generate go install -v github.com/josephspurrier/goversioninfo/cmd/goversioninfo
 package main
 
 import (
+	_ "embed"
 	"fmt"
 	"html/template"
 	"os"
@@ -19,8 +17,10 @@ import (
 	"github.com/portapps/portapps/v3/pkg/registry"
 	"github.com/portapps/portapps/v3/pkg/shortcut"
 	"github.com/portapps/portapps/v3/pkg/win"
-	"github.com/portapps/waterfox-portable/assets"
 )
+
+//go:embed res/Waterfox.lnk
+var defaultShortcut []byte
 
 type config struct {
 	Profile           string `yaml:"profile" mapstructure:"profile"`
@@ -83,7 +83,6 @@ func main() {
 
 	// Create and check mutex
 	mu, err := mutex.Create(app.ID)
-	defer mutex.Release(mu)
 	if err != nil {
 		if !cfg.MultipleInstances {
 			log.Error().Msg("You have to enable multiple instances in your configuration if you want to launch another instance")
@@ -97,6 +96,8 @@ func main() {
 		} else {
 			log.Warn().Msg("Another instance is already running")
 		}
+	} else {
+		defer mutex.Release(mu)
 	}
 
 	// Cleanup on exit
@@ -111,10 +112,14 @@ func main() {
 					log.Error().Err(err).Msg("Cannot remove registry key")
 				}
 			}
-			files.Cleanup(
-				filepath.Join(os.Getenv("APPDATA"), "Waterfox"),
-				filepath.Join(os.Getenv("LOCALAPPDATA"), "Waterfox"),
-			)
+			var paths []string
+			if appData := os.Getenv("APPDATA"); appData != "" {
+				paths = append(paths, filepath.Join(appData, "Waterfox"))
+			}
+			if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
+				paths = append(paths, filepath.Join(localAppData, "Waterfox"))
+			}
+			files.Cleanup(paths...)
 		}()
 	}
 
@@ -158,7 +163,11 @@ pref("browser.rights.3.shown", true);
 pref("browser.startup.homepage_override.mstone", "ignore");
 `))
 	if err := mozillaCfgTpl.Execute(mozillaCfgFile, ""); err != nil {
+		mozillaCfgFile.Close()
 		log.Fatal().Err(err).Msg("Cannot write portapps.cfg")
+	}
+	if err := mozillaCfgFile.Close(); err != nil {
+		log.Fatal().Err(err).Msg("Cannot close portapps.cfg")
 	}
 
 	// Fix extensions path
@@ -168,10 +177,6 @@ pref("browser.startup.homepage_override.mstone", "ignore");
 
 	// Copy default shortcut
 	shortcutPath := filepath.Join(files.StartMenuPath(), "Waterfox Portable.lnk")
-	defaultShortcut, err := assets.Asset("Waterfox.lnk")
-	if err != nil {
-		log.Error().Err(err).Msg("Cannot load asset Waterfox.lnk")
-	}
 	err = os.WriteFile(shortcutPath, defaultShortcut, 0644)
 	if err != nil {
 		log.Error().Err(err).Msg("Cannot write default shortcut")
