@@ -16,6 +16,8 @@ The Mozilla Maintenance Service remains disabled. No administrator rights are re
 
 The portable launcher has its own version (`app.version`), independent of the bundled bootstrap Waterfox version (`waterfox.version`). After the initial package is installed, Waterfox can update itself without requiring a new portable package release for every Waterfox release.
 
+Daily Waterfox update candidates are validated automatically and prepared as draft releases. See [daily update and publication instructions](.github/DAILY-UPDATES.md) for the checks and review process.
+
 ## Notice of Non-Affiliation and Disclaimer
 
 Portapps is not affiliated, associated, authorized, endorsed by, or in any way officially connected with Waterfox™, or any of its subsidiaries or its affiliates.

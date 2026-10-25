@@ -1,0 +1,132 @@
+name: daily-waterfox
+
+on:
+  schedule:
+    - cron: '23 7 * * *'
+  workflow_dispatch:
+    inputs:
+      verify_only:
+        description: Validate the current package without creating a branch or draft
+        type: boolean
+        default: true
+  pull_request:
+    paths:
+      - '.github/scripts/**'
+      - '.github/workflows/daily-waterfox.yml'
+      - '.github/workflows/manual-release.yml'
+
+permissions: {}
+
+concurrency:
+  group: daily-waterfox
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # required to read the trusted automation scripts
+    outputs:
+      tag: ${{ steps.current.outputs.tag }}
+      browser: ${{ steps.current.outputs.browser }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: python3 -m unittest discover -s .github/scripts -p 'test_*.py' -v
+      - id: current
+        env:
+          PYTHONPATH: .github/scripts
+        run: python3 -c "from pathlib import Path; from waterfox_update import property_value, output; p=Path('build.properties').read_text(); output(dict(tag=property_value(p,'app.version')+'-'+property_value(p,'app.release'),browser=property_value(p,'waterfox.version')))"
+
+  prepare:
+    needs: test
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/master' || inputs.verify_only)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # required only to create the narrowly scoped candidate commit
+    outputs:
+      build: ${{ steps.plan.outputs.build }}
+      changed: ${{ steps.plan.outputs.changed }}
+      sha: ${{ steps.plan.outputs.sha }}
+      base: ${{ steps.plan.outputs.base }}
+      tag: ${{ steps.plan.outputs.tag }}
+      browser: ${{ steps.plan.outputs.browser }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERIFY_ONLY: ${{ inputs.verify_only && 'true' || 'false' }}
+        run: python3 .github/scripts/waterfox_update.py prepare
+
+  build:
+    needs: [test, prepare]
+    if: always() && needs.test.result == 'success' && (github.event_name == 'pull_request' || needs.prepare.outputs.build == 'true')
+    permissions:
+      contents: read # compilation and packaging never receive repository write access
+    uses: portapps/.github/.github/workflows/app-build.yml@e5160763f75f635b71a10d8162c004e7f88a1a87 # v1.4.1
+    with:
+      ant_version: '1.10.16'
+      checkout_ref: ${{ needs.prepare.outputs.sha || github.sha }}
+
+  verify:
+    needs: [test, prepare, build]
+    if: always() && needs.build.result == 'success'
+    runs-on: windows-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read # required to read the verification script
+      actions: read # required to download artifacts from this exact workflow run
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Download this run's package
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run download $env:GITHUB_RUN_ID --repo $env:GITHUB_REPOSITORY --name waterfox-portable --dir package
+      - name: Verify package and profiles
+        env:
+          CANDIDATE_SHA: ${{ needs.prepare.outputs.sha || github.sha }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag || needs.test.outputs.tag }}
+          BROWSER_VERSION: ${{ needs.prepare.outputs.browser || needs.test.outputs.browser }}
+        run: .github/scripts/verify-package.ps1 -ArtifactDir package -Tag $env:RELEASE_TAG -Browser $env:BROWSER_VERSION -CandidateSha $env:CANDIDATE_SHA -ProofDir verified
+      - name: Test verification rejections
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag || needs.test.outputs.tag }}
+          BROWSER_VERSION: ${{ needs.prepare.outputs.browser || needs.test.outputs.browser }}
+        run: .github/scripts/test-verification.ps1 -ArtifactDir package -Tag $env:RELEASE_TAG -Browser $env:BROWSER_VERSION
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: verified-waterfox
+          path: verified/verification.json
+          if-no-files-found: error
+
+  draft:
+    needs: [test, prepare, build, verify]
+    if: needs.prepare.outputs.changed == 'true' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # required to create a draft release with the verified artifacts
+      actions: read # required to download this run's package and verification proof
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Download this run's artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" --name waterfox-portable --dir release
+          gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" --name verified-waterfox --dir verified
+      - name: Create draft and candidate comparison link
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ needs.prepare.outputs.sha }}
+          BASE_SHA: ${{ needs.prepare.outputs.base }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          BROWSER_VERSION: ${{ needs.prepare.outputs.browser }}
+        run: python3 .github/scripts/waterfox_update.py draft
