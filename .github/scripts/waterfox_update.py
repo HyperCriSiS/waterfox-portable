@@ -235,6 +235,21 @@ def merge_candidate():
             or pulls[0]['head']['repo']['full_name'].lower() != repo.lower()
             or pulls[0]['base']['repo']['full_name'].lower() != repo.lower()):
         raise ValueError('PR does not identify the exact verified candidate')
+    # GitHub computes mergeability asynchronously after PR creation.
+    import time
+    for attempt in range(15):
+        current = api(f'repos/{repo}/pulls/{pulls[0]["number"]}')
+        if current['head']['sha'] != sha:
+            raise ValueError('PR head changed while waiting for mergeability')
+        if current.get('mergeable') is True:
+            break
+        if current.get('mergeable') is False:
+            raise ValueError('Candidate has a merge conflict')
+        time.sleep(2)
+    else:
+        raise ValueError('GitHub did not confirm candidate mergeability in time')
+    if api(f'repos/{repo}/git/ref/heads/master')['object']['sha'] != base:
+        raise ValueError('Master changed while waiting for mergeability')
     result = api(f'repos/{repo}/pulls/{pulls[0]["number"]}/merge',
                  {'sha': sha, 'merge_method': 'merge'}, method='PUT')
     if result.get('merged') is not True:
