@@ -29,7 +29,7 @@ The name Waterfox™ as well as related names, marks, emblems and images are reg
 ## About
 
 Waterfox™ portable app made with 🚀 [Portapps](https://portapps.io).<br />
-Documentation and downloads can be found on https://portapps.io/app/waterfox-portable/
+Documentation and downloads of the upstream can be found on https://portapps.io/app/waterfox-portable/
 
 ## Contributing
 
