@@ -61,6 +61,27 @@ def contents(repo, path, sha):
     return base64.b64decode(data['content']).decode().replace('\r\n', '\n')
 
 
+def all_releases(repo):
+    result = []
+    page = 1
+    while True:
+        batch = api(f'repos/{repo}/releases?per_page=100&page={page}')
+        result.extend(batch)
+        if len(batch) < 100:
+            return result
+        page += 1
+
+
+def optional_ref(repo, ref):
+    try:
+        return api(f'repos/{repo}/git/ref/{ref}')
+    except urllib.error.HTTPError as error:
+        if error.code != 404:
+            raise
+        error.close()
+        return None
+
+
 def output(values):
     with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as stream:
         for key, value in values.items():
@@ -89,14 +110,7 @@ def prepare():
     if version(latest) <= version(browser):
         output(dict(build='false', changed='false'))
         return
-    releases = []
-    page = 1
-    while True:
-        batch = api(f'repos/{repo}/releases?per_page=100&page={page}')
-        releases.extend(batch)
-        if len(batch) < 100:
-            break
-        page += 1
+    releases = all_releases(repo)
     marker = f'Waterfox bootstrap: {latest}'
     if any(marker in (release.get('body') or '').splitlines() for release in releases):
         output(dict(build='false', changed='false'))
@@ -109,12 +123,15 @@ def prepare():
     updated = update_properties(text, latest, revision)
     tag = f'{launcher}-{revision}'
     branch = f'automation/waterfox-{latest}'
+    if optional_ref(repo, 'tags/' + tag):
+        raise ValueError('Release tag already exists; never reuse tags')
     # An existing branch is deliberately never overwritten, even after a failed run.
     try:
         api(f'repos/{repo}/git/ref/heads/{branch}')
     except urllib.error.HTTPError as error:
         if error.code != 404:
             raise
+        error.close()
     else:
         raise ValueError('Candidate branch already exists; inspect the previous run')
     commit = api(f'repos/{repo}/git/commits/{base}')
@@ -144,6 +161,8 @@ def draft():
         raise ValueError('Master changed during validation; refuse stale draft')
     if api(f'repos/{repo}/git/ref/heads/{branch}')['object']['sha'] != sha:
         raise ValueError('Candidate branch changed')
+    if optional_ref(repo, 'tags/' + tag):
+        raise ValueError('Release tag already exists; refuse to overwrite')
     diff = api(f'repos/{repo}/compare/{base}...{sha}')
     if diff['ahead_by'] != 1 or diff['behind_by'] != 0 or {f['filename'] for f in diff['files']} != {'build.properties', 'CHANGELOG.md'}:
         raise ValueError('Candidate contains unexpected changes')
@@ -224,7 +243,11 @@ def publish():
     if not any(pr['merged_at'] and pr['head']['sha'] == proof['sha'] and pr['base']['ref'] == 'master'
                and pr['base']['repo']['full_name'].lower() == repo.lower() for pr in pulls):
         raise ValueError('The exact candidate PR must be reviewed and merged first')
-    release = api(f'repos/{repo}/releases/tags/{tag}')
+    # Drafts may not have a git tag yet; the published-by-tag endpoint is unsuitable.
+    matching = [release for release in all_releases(repo) if release['tag_name'] == tag]
+    if len(matching) != 1:
+        raise ValueError('Expected exactly one draft release')
+    release = matching[0]
     if release['draft'] is not True or release['target_commitish'] != proof['sha']:
         raise ValueError('Not the verified draft release')
     if {asset['name'] for asset in release['assets']} != set(proof['hashes']):
@@ -232,6 +255,9 @@ def publish():
     for asset in release['assets']:
         if asset['state'] != 'uploaded' or asset.get('digest') != 'sha256:' + proof['hashes'][asset['name']]:
             raise ValueError('Release asset digest changed')
+    existing_tag = optional_ref(repo, 'tags/' + tag)
+    if existing_tag and (existing_tag['object']['type'] != 'commit' or existing_tag['object']['sha'] != proof['sha']):
+        raise ValueError('Existing tag does not identify the verified candidate')
     api(f'repos/{repo}/releases/{release["id"]}', {'draft': False, 'make_latest': 'true'}, method='PATCH')
 
 

@@ -86,6 +86,10 @@ class UpdateTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.run_prepare([{'object': {'sha': 'b' * 40}}])
 
+    def test_existing_tag_is_never_reused(self):
+        with self.assertRaisesRegex(ValueError, 'tag already exists'):
+            self.run_prepare([{'object': {'sha': 'a' * 40}}, RELEASE, [], {'object': {'sha': 'b' * 40}}])
+
     def test_publisher_rejects_foreign_run_before_download(self):
         run = dict(path='.github/workflows/build.yml', conclusion='success', head_branch='master', event='push', head_repository={'full_name': 'owner/repo'})
         with patch.dict(os.environ, GITHUB_REPOSITORY='owner/repo', RELEASE_TAG='1.0.1-3', BUILD_RUN_ID='123'), patch.object(update, 'api', return_value=run), self.assertRaises(ValueError):
@@ -94,6 +98,7 @@ class UpdateTests(unittest.TestCase):
     def test_new_candidate_has_only_allowed_changes(self):
         responses = [{'object': {'sha': 'a' * 40}}, RELEASE,
                      [{'tag_name': '1.0.1-8', 'body': ''}],
+                     HTTPError('test', 404, 'missing', {}, None),
                      HTTPError('test', 404, 'missing', {}, None),
                      {'tree': {'sha': 'tree-base'}}, {'sha': 'tree-new'},
                      {'sha': 'c' * 40}, {}]
@@ -105,11 +110,11 @@ class UpdateTests(unittest.TestCase):
                 Path('CHANGELOG.md').write_text('# Changelog\n\nOld entries\n')
                 with patch.dict(os.environ, GITHUB_REPOSITORY='owner/repo', GITHUB_SHA='a' * 40, GITHUB_REF='refs/heads/master', VERIFY_ONLY='false'), patch.object(update, 'api', side_effect=responses) as api, patch.object(update, 'output') as output:
                     update.prepare()
-                    tree = api.call_args_list[5].args[1]['tree']
+                    tree = api.call_args_list[6].args[1]['tree']
                     self.assertEqual({file['path'] for file in tree}, {'build.properties', 'CHANGELOG.md'})
                     self.assertEqual(tree[0]['content'], update.update_properties(PROPS, '6.7.7', 9))
                     self.assertEqual(output.call_args.args[0]['tag'], '1.0.1-9')
-                    self.assertEqual(api.call_args_list[6].args[1]['parents'], ['a' * 40])
+                    self.assertEqual(api.call_args_list[7].args[1]['parents'], ['a' * 40])
             finally:
                 os.chdir(previous)
 
@@ -122,7 +127,8 @@ class UpdateTests(unittest.TestCase):
                      {'parents': [{'sha': 'a' * 40}]},
                      {'content': base64.b64encode(update.update_properties(PROPS, browser, 3).encode()).decode()},
                      [dict(merged_at='now' if merged else None, head={'sha': sha}, base={'ref': 'master', 'repo': {'full_name': 'owner/repo'}})],
-                     dict(id=123, draft=True, target_commitish=sha, assets=[dict(name=name, state='uploaded', digest='sha256:' + ('e' if changed_asset else 'd') * 64) for name in names]), {}]
+                     [dict(id=123, tag_name=tag, draft=True, target_commitish=sha, assets=[dict(name=name, state='uploaded', digest='sha256:' + ('e' if changed_asset else 'd') * 64) for name in names])],
+                     HTTPError('test', 404, 'missing', {}, None), {}]
         with tempfile.TemporaryDirectory() as folder:
             previous = Path.cwd()
             try:
