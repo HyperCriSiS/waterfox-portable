@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+* Add daily stable Waterfox checks with signature/provenance verification, fresh/existing profile smoke tests and draft-only release candidates.
+* Require a verified automation run, merged candidate PR and unchanged release assets for manual publication.
 * Update the bundled bootstrap browser to Waterfox 6.7.6 while keeping launcher versioning independent.
 * Embed the default shortcut with Go instead of generating it with go-bindata.
 * Use the module-pinned goversioninfo 1.7.0 tool for Windows resources.
