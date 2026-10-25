@@ -32,9 +32,20 @@ $sevenZip = (Get-Command 7z.exe -ErrorAction Stop).Source
 $scratch = Join-Path ([IO.Path]::GetTempPath()) ('waterfox-verify-' + [guid]::NewGuid())
 $package = Join-Path $scratch 'portable'
 $original = Join-Path $scratch 'official'
+foreach ($archive in @((Join-Path $root "waterfox-portable-win64-$Tag.7z"), $installer)) {
+  $listing = (& $sevenZip l -slt $archive) -join "`n"
+  $entries = ($listing -split '(?m)^----------\s*$', 2)[1]
+  if (-not $entries -or $entries -match '(?m)^(Symbolic Link|Hard Link) = ') { throw 'Unsafe archive entries' }
+  foreach ($match in [regex]::Matches($entries, '(?m)^Path = (.+)$')) {
+    $entry = $match.Groups[1].Value.TrimEnd("`r")
+    if ([IO.Path]::IsPathRooted($entry) -or $entry.Contains(':') -or ($entry -split '[/\\]') -contains '..') { throw 'Unsafe archive path' }
+  }
+}
 & $sevenZip t (Join-Path $root "waterfox-portable-win64-$Tag.7z") | Out-Null
 & $sevenZip x (Join-Path $root "waterfox-portable-win64-$Tag.7z") "-o$package" -y | Out-Null
 & $sevenZip x $installer "-o$original" -y | Out-Null
+$rootNames = @(Get-ChildItem -LiteralPath $package -Force | Select-Object -ExpandProperty Name)
+if (Compare-Object ($rootNames | Sort-Object) (@('app', 'CHANGELOG.md', 'README.md', 'portapp.json', 'waterfox-portable.exe') | Sort-Object)) { throw 'Unexpected portable package root' }
 $metadata = Get-Content (Join-Path $package 'portapp.json') -Raw | ConvertFrom-Json
 if ("$($metadata.version)-$($metadata.release)" -ne $Tag) { throw 'Incorrect packaged version' }
 if ((Get-FileHash (Join-Path $package 'waterfox-portable.exe')).Hash.ToLowerInvariant() -ne $hashes['waterfox-portable-win64.exe']) { throw 'Launcher identity mismatch' }
