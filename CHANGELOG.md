@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.1-3 (2026-10-27)
+
+* Waterfox bootstrap: 6.7.7. Launcher code and privacy defaults are unchanged.
+
 ## Unreleased
 
 * Automatically create and merge only verified Waterfox update PRs, then publish the exact tested release files; never approve reviews or bypass branch rules.
