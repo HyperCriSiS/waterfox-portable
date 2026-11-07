@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.1-4 (2026-11-07)
+
+* Waterfox bootstrap: 6.7.8. Launcher code and privacy defaults are unchanged.
+
 ## 1.0.1-3 (2026-10-27)
 
 * Waterfox bootstrap: 6.7.7. Launcher code and privacy defaults are unchanged.
