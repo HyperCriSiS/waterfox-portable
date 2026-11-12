@@ -56,7 +56,8 @@ foreach ($file in Get-ChildItem (Join-Path $package 'app') -Recurse -File) {
   $source = Join-Path (Join-Path $original 'core') $relative
   if (-not (Test-Path -LiteralPath $source -PathType Leaf) -or (Get-FileHash $file.FullName).Hash -ne (Get-FileHash $source).Hash) { throw "Packaged browser differs from signed installer: $relative" }
 }
-if (Get-ChildItem (Join-Path $package 'app') -Filter 'maintenanceservice*') { throw 'Maintenance service included' }
+if (Get-ChildItem (Join-Path $package 'app') -Recurse -Filter 'maintenanceservice*') { throw 'Maintenance service included' }
+if (-not (Test-Path -LiteralPath (Join-Path $package 'app/updater.exe') -PathType Leaf)) { throw 'Browser updater missing' }
 Set-Content (Join-Path $package 'waterfox-portable.yml') "app:`n  multiple_instances: true"
 function Start-Smoke([string]$Name) {
   $shot = Join-Path $package "$Name.png"

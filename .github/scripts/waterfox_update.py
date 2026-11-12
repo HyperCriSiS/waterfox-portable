@@ -5,6 +5,7 @@ import json
 import os
 import re
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -173,11 +174,7 @@ def draft():
         raise ValueError('Candidate properties differ from the allowed update')
     if property_value(old, 'app.version') != tag.rsplit('-', 1)[0]:
         raise ValueError('Launcher version changed')
-    checks = api(f'repos/{repo}/commits/{base}/check-runs?per_page=100')['check_runs']
-    for name in ('Analyze (go)', 'Analyze (actions)', 'run / zizmor'):
-        matching = [check for check in checks if check['name'] == name]
-        if not matching or matching[0]['conclusion'] != 'success' or matching[0]['app']['slug'] != 'github-actions':
-            raise ValueError(f'Trusted base security check not successful: {name}')
+    require_base_checks(repo, base)
     proof = json.loads(Path('verified/verification.json').read_text())
     validate_proof(proof, sha, tag, browser)
     files = Path('release')
@@ -201,6 +198,14 @@ def draft():
         '--notes-file', 'release-notes.md'], check=True)
 
 
+def require_base_checks(repo, base):
+    # Asked per name: the commit collects check runs from every daily run, so one page is not enough.
+    for name in ('Analyze (go)', 'Analyze (actions)', 'run / zizmor'):
+        latest = api(f'repos/{repo}/commits/{base}/check-runs?check_name={urllib.parse.quote(name)}')['check_runs']
+        if not latest or latest[0]['conclusion'] != 'success' or latest[0]['app']['slug'] != 'github-actions':
+            raise ValueError(f'Trusted base security check not successful: {name}')
+
+
 def validate_proof(proof, sha, tag, browser):
     if proof.get('sha') != sha or proof.get('tag') != tag or proof.get('browser') != browser:
         raise ValueError('Verification belongs to another candidate')
@@ -215,7 +220,7 @@ def propose():
     """Stage this run's verified candidate as a private draft and open its pull request.
 
     Draft validation checks the exact allowed diff, base security checks and package proof
-    before the pull request exists. Merging and publishing happen later, outside this run.
+    before the pull request exists. Merging and publishing happen later in publish().
     """
     draft()
     repo = os.environ['GITHUB_REPOSITORY']
@@ -236,8 +241,31 @@ def propose():
         raise ValueError('PR does not identify the exact verified candidate')
 
 
+def merge_candidate(repo, number, sha, base):
+    """Merge only the exact verified candidate onto its exact verified base, never approve a review."""
+    # GitHub computes mergeability asynchronously after PR creation.
+    import time
+    for attempt in range(15):
+        current = api(f'repos/{repo}/pulls/{number}')
+        if current['head']['sha'] != sha:
+            raise ValueError('PR head changed while waiting for mergeability')
+        if current.get('mergeable') is True:
+            break
+        if current.get('mergeable') is False:
+            raise ValueError('Candidate has a merge conflict')
+        time.sleep(2)
+    else:
+        raise ValueError('GitHub did not confirm candidate mergeability in time')
+    if api(f'repos/{repo}/git/ref/heads/master')['object']['sha'] != base:
+        raise ValueError('Master changed since validation; discard this candidate')
+    result = api(f'repos/{repo}/pulls/{number}/merge', {'sha': sha, 'merge_method': 'merge'}, method='PUT')
+    if result.get('merged') is not True:
+        raise ValueError('Candidate PR was not merged')
+    return result['sha']
+
+
 def publish():
-    """Publish only verified files whose exact candidate PR was merged."""
+    """Merge the exact verified candidate, then publish only its verified files."""
     repo, tag = os.environ['GITHUB_REPOSITORY'], os.environ['RELEASE_TAG']
     run_id = os.environ['BUILD_RUN_ID']
     if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+-[0-9]+', tag) or not re.fullmatch(r'[0-9]+', run_id):
@@ -269,16 +297,6 @@ def publish():
     if (property_value(props, 'waterfox.version') != proof['browser']
             or property_value(props, 'app.version') + '-' + property_value(props, 'app.release') != tag):
         raise ValueError('Release metadata mismatch')
-    # The commit-to-PR association lags behind a merge; the PR list by head branch does not.
-    pulls = api(f'repos/{repo}/pulls?state=closed&base=master'
-                f'&head={repo.split("/")[0]}:automation/waterfox-{proof["browser"]}')
-    merged = [pr for pr in pulls if pr['merged_at'] and pr['head']['sha'] == proof['sha'] and pr['base']['ref'] == 'master'
-              and pr['base']['repo']['full_name'].lower() == repo.lower()]
-    if not merged:
-        raise ValueError('The exact candidate PR must be merged first')
-    # Master may have moved between validation and merge; only the tested tree is published.
-    if api(f'repos/{repo}/git/commits/{merged[0]["merge_commit_sha"]}')['tree']['sha'] != candidate['tree']['sha']:
-        raise ValueError('Merged tree differs from the tested candidate; refuse publication')
     # Drafts may not have a git tag yet; the published-by-tag endpoint is unsuitable.
     matching = [release for release in all_releases(repo) if release['tag_name'] == tag]
     if len(matching) != 1:
@@ -294,6 +312,20 @@ def publish():
     existing_tag = optional_ref(repo, 'tags/' + tag)
     if existing_tag and (existing_tag['object']['type'] != 'commit' or existing_tag['object']['sha'] != proof['sha']):
         raise ValueError('Existing tag does not identify the verified candidate')
+    # Every check on the draft passed; only now touch master. The commit-to-PR association
+    # lags behind a merge, the PR list by head branch does not.
+    pulls = [pr for pr in api(f'repos/{repo}/pulls?state=all&base=master'
+                              f'&head={repo.split("/")[0]}:automation/waterfox-{proof["browser"]}')
+             if pr['head']['sha'] == proof['sha'] and pr['base']['ref'] == 'master'
+             and pr['base']['repo']['full_name'].lower() == repo.lower()]
+    merged = [pr['merge_commit_sha'] for pr in pulls if pr['merged_at']]
+    waiting = [pr['number'] for pr in pulls if pr['state'] == 'open']
+    if not merged and len(waiting) != 1:
+        raise ValueError('No pull request identifies the exact candidate')
+    merge = api(f'repos/{repo}/git/commits/'
+                + (merged[0] if merged else merge_candidate(repo, waiting[0], proof['sha'], run['head_sha'])))
+    if merge['tree']['sha'] != candidate['tree']['sha'] or proof['sha'] not in [parent['sha'] for parent in merge['parents']]:
+        raise ValueError('Merged tree differs from the tested candidate; refuse publication')
     api(f'repos/{repo}/releases/{release["id"]}', {'draft': False, 'make_latest': 'true'}, method='PATCH')
 
 

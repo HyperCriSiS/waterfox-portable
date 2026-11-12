@@ -8,22 +8,23 @@
 
 | Upstream | Kind | Intake | Release |
 |---|---|---|---|
-| `BrowserWorks/Waterfox` | Packaged release | `daily-waterfox.yml`, daily 07:23 UTC, candidate PR against `master` | Automatic: the agent run merges and starts `manual-release` |
-| `portapps/waterfox-portable` | Fork source | Reviewed by the agent run when its `master` moves past `.github/upstream-reviewed` | None of its own, ships with the next Waterfox update |
+| `BrowserWorks/Waterfox` | Packaged release | `daily-waterfox.yml`, daily 07:23 UTC, candidate PR against `master` | Automatic: the agent run starts `manual-release`, which merges and publishes |
+| `portapps/waterfox-portable` | Fork source | Reviewed by the agent run when its `master` moves past `.github/upstream-reviewed`; proposals wait for a person | None of its own, ships with the next Waterfox update |
 | Go modules, pinned actions | Dependency | Dependabot, daily with a seven-day cooldown | None of its own, ships with the next Waterfox update |
 
-- Protected features, each proven by `.github/scripts/verify-package.ps1` on the exact candidate:
-  - Browser self-updater stays enabled (`DisableAppUpdate` is not set).
-  - Telemetry stays disabled by policy.
-  - An existing portable profile is kept and a fresh one is created inside the package.
-  - Extension scopes stay locked (`extensions.enabledScopes`, `extensions.autoDisableScopes`).
+- Protected features and what `.github/scripts/verify-package.ps1` proves about each on the exact candidate:
+  - Browser self-updater: `updater.exe` is packaged and the packaged policies do not set `DisableAppUpdate`.
+  - User policies: a policy from `data/policies.json` arrives in the packaged policies.
+  - Portable profile: a fresh start creates it inside the package, a second start keeps an existing one.
+  - Extension scopes: `extensions.enabledScopes` and `extensions.autoDisableScopes` stay locked.
   - No maintenance service is packaged.
-  - Packaged browser files equal the installer signed by BrowserWorks Ltd.
-- A change that touches one of these, or `main.go` code behind them, is never merged automatically. It stays open with a report.
-- Agent run: `update-agent.yml`, daily 08:23 UTC. It merges the verified candidate, merges due Go dependency updates, repairs failed runs and reviews upstream commits. It cannot change workflow files.
+  - Every packaged browser file comes unchanged from the installer signed by BrowserWorks Ltd.
+- The verification starts the browser twice headless. It does not exercise an actual browser update or other launcher behavior. Launcher code (the Go files, `build.xml`, `res`) is therefore never merged by the automation; such a PR waits for a person with the label `:hand: hold`.
+- Agent run: `update-agent.yml`, daily 08:23 UTC. It checks the candidate and starts `manual-release`, merges due Go dependency updates, repairs failed runs in `.github/scripts` and proposes upstream commits. It cannot change workflow files.
 - Recovery: `manual-release` with the draft tag and the ID of the `daily-waterfox` run that staged it.
-- Pause: repository variable `UPDATE_AGENT=false`, or an open issue titled "Update needs a manual fix".
+- Pause: repository variable `UPDATE_AGENT=false`, or an open issue titled "Update needs a manual fix" that the automation opened.
 - Releases made by this automation need no confirmation. Everything else that touches the release path does.
+- Exception to "nothing refers to an assistant": `update-agent.yml` names the action, the model and the secret it needs. Nothing else in the repository does.
 
 Details: `.github/DAILY-UPDATES.md`.
 

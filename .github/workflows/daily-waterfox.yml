@@ -45,6 +45,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write # required only to create the narrowly scoped candidate commit
+      actions: write # required only to start the zizmor check of the candidate's base
     outputs:
       build: ${{ steps.plan.outputs.build }}
       changed: ${{ steps.plan.outputs.changed }}
@@ -61,6 +62,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERIFY_ONLY: ${{ inputs.verify_only && 'true' || 'false' }}
         run: python3 .github/scripts/waterfox_update.py prepare
+      # A merge made with the workflow token starts no push workflows, so master may lack
+      # the zizmor check that the propose job requires on the candidate's base.
+      - name: Check the candidate's base with zizmor
+        if: steps.plan.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run zizmor.yml --repo "$GITHUB_REPOSITORY" --ref master
 
   build:
     needs: [test, prepare]
