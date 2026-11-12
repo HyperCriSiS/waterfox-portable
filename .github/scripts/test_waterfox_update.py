@@ -73,9 +73,14 @@ class UpdateTests(unittest.TestCase):
 
     def test_no_update_is_noop(self):
         release = dict(RELEASE, tag_name='6.7.6', html_url='https://github.com/BrowserWorks/waterfox/releases/tag/6.7.6')
-        calls, result = self.run_prepare([{'object': {'sha': 'a' * 40}}, release])
-        self.assertEqual(calls, 2)
+        calls, result = self.run_prepare([{'object': {'sha': 'a' * 40}}, release, []])
+        self.assertEqual(calls, 3)
         self.assertEqual(result['build'], 'false')
+
+    def test_merged_but_unpublished_candidate_requires_attention(self):
+        release = dict(RELEASE, tag_name='6.7.6', html_url='https://github.com/BrowserWorks/waterfox/releases/tag/6.7.6')
+        with self.assertRaisesRegex(ValueError, 'Unpublished candidate'):
+            self.run_prepare([{'object': {'sha': 'a' * 40}}, release, [{'body': 'Waterfox bootstrap: 6.7.6', 'draft': True}]])
 
     def test_duplicate_published_release_is_noop(self):
         calls, result = self.run_prepare([{'object': {'sha': 'a' * 40}}, RELEASE, [{'body': 'Waterfox bootstrap: 6.7.7'}]])
@@ -141,6 +146,7 @@ class UpdateTests(unittest.TestCase):
                 Path('verified/verification.json').write_text(json.dumps(proof))
                 with patch.dict(os.environ, GITHUB_REPOSITORY='owner/repo', RELEASE_TAG=tag, BUILD_RUN_ID='123', GITHUB_RUN_ID='123', BASE_SHA='a' * 40), patch.object(update, 'api', side_effect=responses) as api, patch('subprocess.run'):
                     update.publish(current_run=current)
+                    self.assertEqual(api.call_args_list[4].args[0], 'repos/owner/repo/pulls?state=closed&base=master&head=owner:automation/waterfox-6.7.7')
                     self.assertEqual(api.call_args.kwargs['method'], 'PATCH')
                     self.assertEqual(api.call_args.args[1]['draft'], False)
             finally:
