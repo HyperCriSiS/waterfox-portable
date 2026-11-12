@@ -7,7 +7,7 @@ on:
         required: true
         type: string
       run_id:
-        description: Daily run with successful validation stages (recovery after publication failure)
+        description: Daily run that validated and staged this draft
         required: true
         type: string
 permissions: {}
