@@ -1,47 +1,53 @@
-<p align="center"><a href="https://portapps.io/app/waterfox-portable/" target="_blank"><img width="100" src="https://github.com/portapps/waterfox-portable/blob/master/res/papp.png"></a></p>
+# Waterfox Portable (self-updating, unofficial)
 
-<p align="center">
+**Waterfox for Windows that runs from any folder or USB drive and keeps itself up to date with the built-in Waterfox updater.**
+
+<p>
   <a href="https://github.com/HyperCriSiS/waterfox-portable/releases/latest"><img src="https://img.shields.io/github/release/HyperCriSiS/waterfox-portable.svg?style=flat-square" alt="GitHub release"></a>
   <a href="https://github.com/HyperCriSiS/waterfox-portable/releases"><img src="https://img.shields.io/github/downloads/HyperCriSiS/waterfox-portable/total.svg?style=flat-square" alt="Total downloads"></a>
   <a href="https://github.com/HyperCriSiS/waterfox-portable/actions/workflows/build.yml"><img src="https://img.shields.io/github/actions/workflow/status/HyperCriSiS/waterfox-portable/build.yml?branch=master&label=build&logo=github&style=flat-square" alt="Build Status"></a>
-  <br /><a href="https://github.com/sponsors/crazy-max"><img src="https://img.shields.io/badge/sponsor-crazy--max-181717.svg?logo=github&style=flat-square" alt="Become a sponsor"></a>
-  <a href="https://www.paypal.me/crazyws"><img src="https://img.shields.io/badge/donate-paypal-00457c.svg?logo=paypal&style=flat-square" alt="Donate Paypal"></a>
+  <img src="https://img.shields.io/badge/platform-Windows%20x64-0078d4.svg?style=flat-square" alt="Windows x64">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg?style=flat-square" alt="MIT license"></a>
 </p>
 
-## Self-updating portable build
+This build is based on [Portapps Waterfox portable](https://github.com/portapps/waterfox-portable). Portapps disables the Waterfox updater, so every browser update needs a new portable package. This build keeps the portable layout and lets Waterfox update itself.
 
-This fork keeps the portable profile/data layout while allowing Waterfox to use its built-in updater. Waterfox updates the files inside the portable `app` directory; the portable profile remains under `data`.
+## Why this build
 
-The Mozilla Maintenance Service remains disabled. No administrator rights are required as long as the portable directory is writable by the current user. Avoid placing the portable installation in a protected directory such as `C:\Program Files`.
+| | Portapps | This build |
+| --- | --- | --- |
+| Browser updates | New portable package per Waterfox release | Built-in Waterfox updater |
+| Administrator rights | Not needed | Not needed |
+| Profile location | `data` next to the launcher | `data` next to the launcher |
+| Mozilla Maintenance Service | Disabled | Disabled |
+| New package checks | Manual | Daily, signature verified and smoke tested |
 
-The portable launcher has its own version (`app.version`), independent of the bundled bootstrap Waterfox version (`waterfox.version`). After the initial package is installed, Waterfox can update itself without requiring a new portable package release for every Waterfox release.
+## Download and installation
 
-Daily Waterfox updates are built and verified automatically. Only after the required tests pass does the workflow create and merge its own update PR and publish the verified release files. See [daily update and publication instructions](.github/DAILY-UPDATES.md) for the gates and failure handling.
+1. Download the latest release from the [releases page](https://github.com/HyperCriSiS/waterfox-portable/releases/latest): the `.7z` archive, or the `-setup.exe` installer that extracts it for you.
+2. Extract it to a folder your user can write to, for example `D:\Apps\Waterfox` or a USB drive. Avoid protected folders such as `C:\Program Files`, because the updater must write there.
+3. Start `waterfox-portable.exe`.
 
-## Notice of Non-Affiliation and Disclaimer
+Existing Portapps users can copy their `data` folder into the new folder to keep their profile.
 
-Portapps is not affiliated, associated, authorized, endorsed by, or in any way officially connected with Waterfox™, or any of its subsidiaries or its affiliates.
+## Updates
 
-The official Waterfox™ website can be found at https://www.waterfox.net/.
+Waterfox checks for updates itself and updates the files in the `app` folder. The profile in `data` stays untouched. A new portable package is only needed for launcher changes or a fresh installation.
 
-The name Waterfox™ as well as related names, marks, emblems and images are registered trademarks of their respective owners.
+The launcher has its own version (`app.version`), independent of the Waterfox version bundled into a new package (`waterfox.version`). Daily checks build and verify a new package for every stable Waterfox release; see [daily update and publication instructions](.github/DAILY-UPDATES.md).
 
-## About
+## Disclaimer
 
-Waterfox™ portable app made with 🚀 [Portapps](https://portapps.io).<br />
-Documentation and downloads of the upstream can be found on https://portapps.io/app/waterfox-portable/
+This is an unofficial build. It is not affiliated with, authorized or endorsed by Waterfox™ or Portapps. The official Waterfox website is https://www.waterfox.net/. Waterfox™ and related names, marks, emblems and images are registered trademarks of their respective owners.
 
-## Contributing
+## Support
 
-Want to contribute? Awesome! The most basic way to show your support is to star the project, or to raise issues. If
-you want to open a pull request, please read the [contributing guidelines](https://portapps.io/doc/contribute/).
+Report problems with this build in the [issues](https://github.com/HyperCriSiS/waterfox-portable/issues). Browser bugs that also occur in the regular Waterfox installation belong to [Waterfox](https://github.com/BrowserWorks/Waterfox/issues).
 
-You can also support this project by [**becoming a sponsor on GitHub**](https://github.com/sponsors/crazy-max) or by
-making a [Paypal donation](https://www.paypal.me/crazyws) to ensure this journey continues indefinitely!
+## Credits
 
-Thanks again for your support, it is much appreciated! :pray:
+Based on [Portapps](https://portapps.io) by [CrazyMax](https://github.com/crazy-max). You can support the original project by [becoming a sponsor on GitHub](https://github.com/sponsors/crazy-max).
 
 ## License
 
-MIT. See `LICENSE` for more details.<br />
-Rocket icon credit to [Squid Ink](http://thesquid.ink).
+MIT. See [LICENSE](LICENSE). Rocket icon credit to [Squid Ink](http://thesquid.ink).
