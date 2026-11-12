@@ -7,7 +7,7 @@ on:
         required: true
         type: string
       run_id:
-        description: Daily run with successful validation stages (recovery after publication failure)
+        description: Daily run that validated and staged this draft
         required: true
         type: string
 permissions: {}
@@ -20,13 +20,13 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       actions: read # required to validate the exact run and verification proof
-      contents: write # required to publish an already verified draft
-      pull-requests: read # required to confirm the candidate PR was merged
+      contents: write # required to merge the verified candidate and publish its draft
+      pull-requests: write # required to merge the exact candidate PR, never approve reviews
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Publish verified and merged candidate
+      - name: Merge the verified candidate and publish its draft
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag }}

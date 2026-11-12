@@ -127,106 +127,139 @@ class UpdateTests(unittest.TestCase):
             finally:
                 os.chdir(previous)
 
-    def publish_fixture(self, merged=True, changed_asset=False, failed_stage=None, current=False):
+    def publish_fixture(self, state='merged', mutate=None, raises=None):
         sha, tag, browser = 'c' * 40, '1.0.1-3', '6.7.7'
         names = ['checksums.txt', f'WaterfoxSetup-{browser}.exe', f'waterfox-portable-win64-{tag}-setup.exe', f'waterfox-portable-win64-{tag}.7z', 'waterfox-portable-win64.exe']
         proof = dict(sha=sha, tag=tag, browser=browser, hashes={name: 'd' * 64 for name in names})
-        responses = [dict(path='.github/workflows/daily-waterfox.yml', conclusion='success', head_branch='master', event='schedule', head_repository={'full_name': 'owner/repo'}, head_sha='a' * 40),
-                     {'jobs': [dict(name=name, conclusion='failure' if name == failed_stage else 'success') for name in ('test', 'prepare', 'build / build', 'build / release', 'verify')]},
-                     {'parents': [{'sha': 'a' * 40}]},
-                     {'content': base64.b64encode(update.update_properties(PROPS, browser, 3).encode()).decode()},
-                     [dict(merged_at='now' if merged else None, head={'sha': sha}, base={'ref': 'master', 'repo': {'full_name': 'owner/repo'}})],
-                     [dict(id=123, tag_name=tag, draft=True, target_commitish=sha, assets=[dict(name=name, state='uploaded', digest='sha256:' + ('e' if changed_asset else 'd') * 64) for name in names])],
-                     HTTPError('test', 404, 'missing', {}, None), {}]
+        pr = dict(number=7, state='closed' if state == 'merged' else state, merged_at='now' if state == 'merged' else None, merge_commit_sha='e' * 40,
+                  mergeable=True, head={'sha': sha}, base={'ref': 'master', 'repo': {'full_name': 'owner/repo'}})
+        r = dict(run=dict(path='.github/workflows/daily-waterfox.yml', conclusion='success', head_branch='master', event='schedule', head_repository={'full_name': 'owner/repo'}, head_sha='a' * 40),
+                 jobs={'jobs': [dict(name=name, conclusion='success') for name in ('test', 'prepare', 'build / build', 'build / release', 'verify')]},
+                 candidate={'parents': [{'sha': 'a' * 40}], 'tree': {'sha': 'tree'}},
+                 props={'content': base64.b64encode(update.update_properties(PROPS, browser, 3).encode()).decode()},
+                 releases=[dict(id=123, tag_name=tag, draft=True, target_commitish=sha, assets=[dict(name=name, state='uploaded', digest='sha256:' + 'd' * 64) for name in names])],
+                 tag=HTTPError('test', 404, 'missing', {}, None),
+                 pulls=[pr], mergeable=dict(pr), master={'object': {'sha': 'a' * 40}}, merge={'merged': True, 'sha': 'e' * 40},
+                 commit={'tree': {'sha': 'tree'}, 'parents': [{'sha': 'a' * 40}, {'sha': sha}]}, done={})
+        if mutate:
+            mutate(r)
+        order = ['run', 'jobs', 'candidate', 'props', 'releases', 'tag', 'pulls'] + ([] if state == 'merged' else ['mergeable', 'master', 'merge']) + ['commit', 'done']
         with tempfile.TemporaryDirectory() as folder:
             previous = Path.cwd()
             try:
                 os.chdir(folder)
                 Path('verified').mkdir()
                 Path('verified/verification.json').write_text(json.dumps(proof))
-                with patch.dict(os.environ, GITHUB_REPOSITORY='owner/repo', RELEASE_TAG=tag, BUILD_RUN_ID='123', GITHUB_RUN_ID='123', BASE_SHA='a' * 40), patch.object(update, 'api', side_effect=responses) as api, patch('subprocess.run'):
-                    update.publish(current_run=current)
-                    self.assertEqual(api.call_args_list[4].args[0], 'repos/owner/repo/pulls?state=closed&base=master&head=owner:automation/waterfox-6.7.7')
-                    self.assertEqual(api.call_args.kwargs['method'], 'PATCH')
-                    self.assertEqual(api.call_args.args[1]['draft'], False)
+                with patch.dict(os.environ, GITHUB_REPOSITORY='owner/repo', RELEASE_TAG=tag, BUILD_RUN_ID='123'), patch.object(update, 'api', side_effect=[r[key] for key in order]) as api, patch('subprocess.run'), patch('time.sleep'):
+                    if raises:
+                        with self.assertRaisesRegex(ValueError, raises):
+                            update.publish()
+                        self.assertFalse(any(call.kwargs.get('method') == 'PATCH' for call in api.call_args_list))
+                    else:
+                        update.publish()
+                        self.assertEqual(api.call_args_list[6].args[0], 'repos/owner/repo/pulls?state=all&base=master&head=owner:automation/waterfox-6.7.7')
+                        self.assertEqual(api.call_args_list[-2].args[0], 'repos/owner/repo/git/commits/' + 'e' * 40)
+                        self.assertEqual(api.call_args.kwargs['method'], 'PATCH')
+                        self.assertEqual(api.call_args.args[1]['draft'], False)
+                    self.assertFalse(any('/reviews' in call.args[0] for call in api.call_args_list))
+                    return [call for call in api.call_args_list if call.kwargs.get('method') == 'PUT']
             finally:
                 os.chdir(previous)
 
-    def test_only_verified_merged_draft_is_published(self):
-        self.publish_fixture()
+    def test_merged_verified_draft_is_published_without_second_merge(self):
+        self.assertEqual(self.publish_fixture(), [])
 
-    def test_unmerged_candidate_is_rejected(self):
-        with self.assertRaisesRegex(ValueError, 'merged first'):
-            self.publish_fixture(merged=False)
-
-    def test_changed_release_asset_is_rejected(self):
-        with self.assertRaisesRegex(ValueError, 'digest changed'):
-            self.publish_fixture(changed_asset=True)
-
-    def test_failed_validation_stage_blocks_publication(self):
-        for stage in ('test', 'prepare', 'build / build', 'build / release', 'verify'):
-            with self.subTest(stage=stage), self.assertRaisesRegex(ValueError, 'validation stage did not succeed'):
-                self.publish_fixture(failed_stage=stage)
-
-    def test_automatic_publication_uses_same_verification_gates(self):
-        # The current run already has its proof; no second artifact download occurs.
-        self.publish_fixture(current=True)
-
-    def merge_fixture(self, stale_base=False, wrong_head=False, refused=False, different_tree=False, delayed=False, conflict=False, timeout=False):
-        sha = 'c' * 40
-        pr = dict(number=7, mergeable=True, head={'sha': 'd' * 40 if wrong_head else sha, 'repo': {'full_name': 'owner/repo'}}, base={'ref': 'master', 'repo': {'full_name': 'owner/repo'}})
-        responses = [{'object': {'sha': 'b' * 40 if stale_base else 'a' * 40}},
-                     {'object': {'sha': sha}}, {}, [], pr]
-        responses += [dict(pr, mergeable=None)] * (15 if timeout else 1 if delayed else 0)
-        responses += [dict(pr, mergeable=not conflict), {'object': {'sha': 'a' * 40}},
-                     {'merged': not refused, 'sha': 'e' * 40},
-                     {'tree': {'sha': 'changed' if different_tree else 'tree'}, 'parents': [{'sha': 'a' * 40}, {'sha': sha}]},
-                     {'tree': {'sha': 'tree'}}]
-        with patch.dict(os.environ, GITHUB_REPOSITORY='owner/repo', CANDIDATE_SHA=sha, BASE_SHA='a' * 40, BROWSER_VERSION='6.7.7', GITHUB_RUN_ID='123'), patch.object(update, 'api', side_effect=responses) as api, patch('time.sleep'):
-            self.assertEqual(update.merge_candidate(), 'e' * 40)
-            merge_call = api.call_args_list[8 if delayed else 7]
-            self.assertEqual(merge_call.args[1]['sha'], sha)
-            self.assertEqual(merge_call.kwargs['method'], 'PUT')
-            self.assertEqual(api.call_args_list[2].args[1]['context'], 'waterfox/verified-update')
-            self.assertFalse(any('/reviews' in call.args[0] for call in api.call_args_list))
-
-    def test_exact_candidate_is_merged_without_review_approval(self):
-        self.merge_fixture()
+    def test_open_candidate_is_merged_by_exact_head_then_published(self):
+        merges = self.publish_fixture(state='open')
+        self.assertEqual(len(merges), 1)
+        self.assertEqual(merges[0].args[0], 'repos/owner/repo/pulls/7/merge')
+        self.assertEqual(merges[0].args[1], {'sha': 'c' * 40, 'merge_method': 'merge'})
 
     def test_pending_mergeability_is_retried(self):
-        self.merge_fixture(delayed=True)
+        sha = 'c' * 40
+        pr = dict(number=7, mergeable=True, head={'sha': sha})
+        responses = [dict(pr, mergeable=None), pr, {'object': {'sha': 'a' * 40}}, {'merged': True, 'sha': 'e' * 40}]
+        with patch.object(update, 'api', side_effect=responses) as api, patch('time.sleep'):
+            self.assertEqual(update.merge_candidate('owner/repo', 7, sha, 'a' * 40), 'e' * 40)
+            self.assertEqual(api.call_count, 4)
 
     def test_mergeability_timeout_stops_release(self):
-        with self.assertRaisesRegex(ValueError, 'in time'):
-            self.merge_fixture(timeout=True)
+        pr = dict(number=7, mergeable=None, head={'sha': 'c' * 40})
+        with patch.object(update, 'api', side_effect=[pr] * 15) as api, patch('time.sleep'), self.assertRaisesRegex(ValueError, 'in time'):
+            update.merge_candidate('owner/repo', 7, 'c' * 40, 'a' * 40)
 
-    def test_merge_conflict_stops_release(self):
-        with self.assertRaisesRegex(ValueError, 'merge conflict'):
-            self.merge_fixture(conflict=True)
+    def test_gates_that_stop_before_the_merge(self):
+        cases = {
+            'must have finished': lambda r: r['run'].update(conclusion=None),
+            'trusted daily update run': lambda r: r['run'].update(event='pull_request'),
+            'validation stage did not succeed': lambda r: r['jobs']['jobs'][4].update(conclusion='failure'),
+            'not derived from verified run base': lambda r: r['candidate'].update(parents=[{'sha': 'b' * 40}]),
+            'metadata mismatch': lambda r: r['props'].update(content=base64.b64encode(update.update_properties(PROPS, '6.7.7', 4).encode()).decode()),
+            'exactly one draft': lambda r: r['releases'].clear(),
+            'Not the verified draft': lambda r: r['releases'][0].update(draft=False),
+            'Not the verified draft release': lambda r: r['releases'][0].update(target_commitish='d' * 40),
+            'asset set changed': lambda r: r['releases'][0]['assets'].pop(),
+            'digest changed': lambda r: r['releases'][0]['assets'][0].update(digest='sha256:' + 'e' * 64),
+            'No pull request identifies': lambda r: r['pulls'][0].update(head={'sha': 'd' * 40}),
+            'No pull request identifies the exact': lambda r: r['pulls'][0].update(base={'ref': 'other', 'repo': {'full_name': 'owner/repo'}}),
+            'No pull request identifies the exact candidate': lambda r: r['pulls'][0].update(state='closed'),
+            'head changed while waiting': lambda r: r['mergeable'].update(head={'sha': 'd' * 40}),
+            'merge conflict': lambda r: r['mergeable'].update(mergeable=False),
+            'Master changed since validation': lambda r: r['master'].update(object={'sha': 'b' * 40}),
+        }
+        for message, mutate in cases.items():
+            with self.subTest(message=message):
+                self.assertEqual(self.publish_fixture(state='open', mutate=mutate, raises=message), [])
 
-    def test_stale_master_blocks_merge(self):
-        with self.assertRaisesRegex(ValueError, 'Master changed'):
-            self.merge_fixture(stale_base=True)
+    def test_gates_after_the_merge_block_publication(self):
+        cases = {
+            'not merged': lambda r: r['merge'].update(merged=False),
+            'Merged tree differs': lambda r: r['commit'].update(tree={'sha': 'other'}),
+            'Merged tree differs from the tested': lambda r: r['commit'].update(parents=[{'sha': 'a' * 40}]),
+        }
+        for message, mutate in cases.items():
+            with self.subTest(message=message):
+                self.publish_fixture(state='open', mutate=mutate, raises=message)
 
-    def test_replaced_pr_head_blocks_merge(self):
-        with self.assertRaisesRegex(ValueError, 'exact verified candidate'):
-            self.merge_fixture(wrong_head=True)
+    def test_moved_master_blocks_publication_of_a_merged_candidate(self):
+        self.publish_fixture(mutate=lambda r: r['commit'].update(tree={'sha': 'other'}), raises='Merged tree differs')
 
-    def test_refused_merge_blocks_release(self):
-        with self.assertRaisesRegex(ValueError, 'not merged'):
-            self.merge_fixture(refused=True)
+    def propose_fixture(self, wrong_head=False, wrong_base=False, existing=False):
+        sha = 'c' * 40
+        pr = dict(number=7, head={'sha': 'd' * 40 if wrong_head else sha, 'repo': {'full_name': 'owner/repo'}}, base={'ref': 'other' if wrong_base else 'master', 'repo': {'full_name': 'owner/repo'}})
+        responses = [{}, [pr]] if existing else [{}, [], pr]
+        with patch.dict(os.environ, GITHUB_REPOSITORY='owner/repo', CANDIDATE_SHA=sha, BROWSER_VERSION='6.7.7', GITHUB_RUN_ID='123'), patch.object(update, 'draft'), patch.object(update, 'api', side_effect=responses) as api:
+            update.propose()
+            self.assertEqual(api.call_count, len(responses))
+            self.assertEqual(api.call_args_list[0].args[1]['context'], 'waterfox/verified-update')
+            self.assertFalse(any('/reviews' in call.args[0] or '/merge' in call.args[0] for call in api.call_args_list))
+            self.assertFalse(any(call.kwargs.get('method') in ('PUT', 'PATCH') for call in api.call_args_list))
 
-    def test_raced_merge_tree_blocks_release(self):
-        with self.assertRaisesRegex(ValueError, 'Merged tree differs'):
-            self.merge_fixture(different_tree=True)
+    def test_candidate_is_proposed_without_merge_or_review(self):
+        self.propose_fixture()
 
-    def test_automatic_order_and_failure_gate(self):
-        with patch.dict(os.environ, GITHUB_RUN_ID='123'), patch.object(update, 'draft', side_effect=ValueError('verification failed')), patch.object(update, 'merge_candidate') as merge, patch.object(update, 'publish') as publish:
+    def test_existing_candidate_pr_is_reused(self):
+        self.propose_fixture(existing=True)
+
+    def test_replaced_pr_head_or_base_blocks_proposal(self):
+        for case in (dict(wrong_head=True), dict(wrong_base=True)):
+            with self.subTest(case=case), self.assertRaisesRegex(ValueError, 'exact verified candidate'):
+                self.propose_fixture(**case)
+
+    def test_failed_draft_validation_opens_no_pr(self):
+        with patch.object(update, 'draft', side_effect=ValueError('verification failed')), patch.object(update, 'api') as api:
             with self.assertRaises(ValueError):
-                update.automatic()
-            merge.assert_not_called()
-            publish.assert_not_called()
+                update.propose()
+            api.assert_not_called()
 
+    def test_base_checks_are_asked_by_name_and_must_pass(self):
+        good = {'check_runs': [{'conclusion': 'success', 'app': {'slug': 'github-actions'}}]}
+        with patch.object(update, 'api', return_value=good) as api:
+            update.require_base_checks('owner/repo', 'a' * 40)
+            self.assertEqual([call.args[0].split('check_name=')[1] for call in api.call_args_list], ['Analyze%20%28go%29', 'Analyze%20%28actions%29', 'run%20/%20zizmor'])
+        for bad in ({'check_runs': []}, {'check_runs': [{'conclusion': 'failure', 'app': {'slug': 'github-actions'}}]}, {'check_runs': [{'conclusion': 'success', 'app': {'slug': 'other'}}]}):
+            with self.subTest(bad=bad), patch.object(update, 'api', return_value=bad), self.assertRaisesRegex(ValueError, 'base security check'):
+                update.require_base_checks('owner/repo', 'a' * 40)
 
 if __name__ == '__main__':
     unittest.main()
