@@ -108,15 +108,13 @@ def prepare():
     if api(f'repos/{repo}/git/ref/heads/master')['object']['sha'] != base:
         raise ValueError('Master changed; retry with the current revision')
     latest = stable_release(api('repos/BrowserWorks/Waterfox/releases/latest'))
-    if version(latest) <= version(browser):
-        output(dict(build='false', changed='false'))
-        return
     releases = all_releases(repo)
     marker = f'Waterfox bootstrap: {latest}'
     matching_releases = [release for release in releases if marker in (release.get('body') or '').splitlines()]
+    # Checked before the no-update exit: a merged candidate whose publication failed must stay visible.
     if any(release.get('draft') for release in matching_releases):
         raise ValueError('Unpublished candidate exists; inspect the failed release run')
-    if matching_releases:
+    if matching_releases or version(latest) <= version(browser):
         output(dict(build='false', changed='false'))
         return
     for release in releases:
@@ -308,7 +306,9 @@ def publish(current_run=False):
     if (property_value(props, 'waterfox.version') != proof['browser']
             or property_value(props, 'app.version') + '-' + property_value(props, 'app.release') != tag):
         raise ValueError('Release metadata mismatch')
-    pulls = api(f'repos/{repo}/commits/{proof["sha"]}/pulls')
+    # The commit-to-PR association lags behind a merge; the PR list by head branch does not.
+    pulls = api(f'repos/{repo}/pulls?state=closed&base=master'
+                f'&head={repo.split("/")[0]}:automation/waterfox-{proof["browser"]}')
     if not any(pr['merged_at'] and pr['head']['sha'] == proof['sha'] and pr['base']['ref'] == 'master'
                and pr['base']['repo']['full_name'].lower() == repo.lower() for pr in pulls):
         raise ValueError('The exact candidate PR must be merged first')
