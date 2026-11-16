@@ -20,9 +20,9 @@
   - No maintenance service is packaged.
   - Every packaged browser file comes unchanged from the installer signed by BrowserWorks Ltd.
 - The verification starts the browser twice headless. It does not exercise an actual browser update or other launcher behavior. Launcher code (the Go files, `build.xml`, `res`) is therefore never merged by the automation; such a PR waits for a person with the label `:hand: hold`.
-- Agent run: `update-agent.yml`, daily 08:23 UTC. It checks the candidate and starts `manual-release`, merges due Go dependency updates, repairs failed runs in `.github/scripts` and proposes upstream commits. It cannot change workflow files.
+- Agent run: `update-agent.yml`, daily 08:23 UTC. It checks the candidate and starts `manual-release`, merges due Go dependency updates, repairs failed runs in `.github/scripts` and proposes upstream commits. It cannot change workflow files. New Waterfox versions, major ones included, are released after it reviewed the release notes and every problem is fixed. It decides on its own and publishes no deliberation; when it cannot finish, the run ends red with "Needs the owner." and the owner is asked privately.
 - Recovery: `manual-release` with the draft tag and the ID of the `daily-waterfox` run that staged it.
-- Pause: repository variable `UPDATE_AGENT=false`, or an open issue titled "Update needs a manual fix" that the automation opened.
+- Pause: repository variable `UPDATE_AGENT=false`.
 - Releases made by this automation need no confirmation. Everything else that touches the release path does.
 - Exception to "nothing refers to an assistant": `update-agent.yml` names the action, the model and the secret it needs. Nothing else in the repository does.
 
