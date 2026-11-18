@@ -10,6 +10,7 @@
 
 ## Unreleased
 
+* Close addonStartup.json.lz4 after reading it. The open handle kept Waterfox from saving add-on state while the launcher ran, so add-ons showed as disabled after a restart.
 * Automatically create and merge only verified Waterfox update PRs, then publish the exact tested release files; never approve reviews or bypass branch rules.
 * Add daily stable Waterfox checks with signature/provenance verification, fresh/existing profile smoke tests and draft-only release candidates.
 * Require a verified automation run, merged candidate PR and unchanged release assets for manual publication.
