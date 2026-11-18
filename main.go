@@ -200,6 +200,8 @@ pref("browser.startup.homepage_override.mstone", "ignore");
 		}
 	}()
 
+	notifyLauncherUpdate()
+
 	defer app.Close()
 	app.Launch(os.Args[1:])
 }
