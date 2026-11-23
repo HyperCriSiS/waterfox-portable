@@ -10,6 +10,8 @@
 
 ## Unreleased
 
+* Compare launcher updates with the version built into the executable instead of portapp.json, and always check this fork.
+* Check for launcher updates at most once a day, never on starts with arguments, and open the release page in the portable browser.
 * Show a one-time notice with a link to the release page when a newer portable launcher is published. Releases that only update Waterfox do not trigger it, since Waterfox updates itself.
 * Close addonStartup.json.lz4 after reading it. The open handle kept Waterfox from saving add-on state while the launcher ran, so add-ons showed as disabled after a restart.
 * Automatically create and merge only verified Waterfox update PRs, then publish the exact tested release files; never approve reviews or bypass branch rules.

@@ -17,6 +17,15 @@ on:
   pull_request:
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The main package cannot be tested, its init needs a portapp.json.
+      - run: go test ./internal/...
+
   build:
     uses: portapps/.github/.github/workflows/app-build.yml@e5160763f75f635b71a10d8162c004e7f88a1a87 # v1.4.1
     with:

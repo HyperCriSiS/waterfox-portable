@@ -200,10 +200,10 @@ pref("browser.startup.homepage_override.mstone", "ignore");
 		}
 	}()
 
-	notifyLauncherUpdate()
+	page := notifyLauncherUpdate()
 
 	defer app.Close()
-	app.Launch(os.Args[1:])
+	app.Launch(append(os.Args[1:], page...))
 }
 
 func createPolicies() error {
