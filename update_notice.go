@@ -7,12 +7,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/portapps/portapps/v3/pkg/log"
 	"github.com/portapps/portapps/v3/pkg/win"
+	"github.com/portapps/waterfox-portable/internal/version"
 )
 
 // The launcher version comes from the executable itself. portapp.json stays
@@ -57,8 +57,8 @@ func notifyLauncherUpdate() []string {
 	}
 
 	latest, _, _ := strings.Cut(release.TagName, "-")
-	current := launcherVersion()
-	if !newerVersion(latest, current) || strings.TrimSpace(string(seen)) == latest {
+	current := version.FromProperties(buildProperties)
+	if current == "" || !version.Newer(latest, current) || strings.TrimSpace(string(seen)) == latest {
 		return nil
 	}
 	if err := os.WriteFile(seenFile, []byte(latest), 0644); err != nil {
@@ -78,33 +78,4 @@ func notifyLauncherUpdate() []string {
 		return []string{release.HTMLURL}
 	}
 	return nil
-}
-
-// launcherVersion returns app.version of the build this executable came from.
-func launcherVersion() string {
-	for _, line := range strings.Split(buildProperties, "\n") {
-		key, value, _ := strings.Cut(line, "=")
-		if strings.TrimSpace(key) == "app.version" {
-			return strings.TrimSpace(value)
-		}
-	}
-	return app.Info.Version
-}
-
-// newerVersion reports whether dotted version a is greater than b.
-func newerVersion(a, b string) bool {
-	as, bs := strings.Split(a, "."), strings.Split(b, ".")
-	for i := 0; i < len(as) || i < len(bs); i++ {
-		var x, y int
-		if i < len(as) {
-			x, _ = strconv.Atoi(as[i])
-		}
-		if i < len(bs) {
-			y, _ = strconv.Atoi(bs[i])
-		}
-		if x != y {
-			return x > y
-		}
-	}
-	return false
 }
